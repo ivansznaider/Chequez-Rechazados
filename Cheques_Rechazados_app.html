@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monitor de Riesgo por Cheques</title>
+
+  <!-- Bibliotecas externas: requieren conexion a Internet -->
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    :root {
+      --primary: #35799b;
+      --primary-dark: #245b76;
+      --title: #1f355e;
+      --text: #243447;
+      --muted: #6c757d;
+      --border: #d8e0ea;
+      --background: #f5f7fa;
+      --card: #ffffff;
+      --danger: #b42318;
+      --success: #177245;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--background);
+      color: var(--text);
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: auto;
+      padding: 24px;
+    }
+
+    .titulo-app {
+      margin: 0;
+      font-size: 44px;
+      font-weight: 700;
+      color: var(--title);
+    }
+
+    .subtitulo-app {
+      margin: 8px 0 26px;
+      font-size: 20px;
+      color: #5b6f8c;
+    }
+
+    .grid-consulta {
+      display: grid;
+      grid-template-columns: minmax(0, 3fr) minmax(220px, 1fr);
+      gap: 22px;
+      align-items: end;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    textarea, select {
+      width: 100%;
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      background: white;
+      color: var(--text);
+    }
+
+    textarea {
+      min-height: 145px;
+      padding: 14px;
+      resize: vertical;
+      font-size: 22px;
+    }
+
+    select {
+      padding: 11px;
+      font-size: 16px;
+    }
+
+    button {
+      width: 100%;
+      padding: 13px 18px;
+      border: 0;
+      border-radius: 9px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    button:disabled { opacity: .65; cursor: wait; }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-secondary { width: auto; background: #e8eef4; color: var(--title); }
+
+    .export-row { margin-top: 20px; }
+    .help { margin-top: 7px; font-size: 13px; color: var(--muted); }
+    .fuente-app { margin-top: 22px; font-size: 11px; color: var(--muted); }
+    hr { margin: 24px 0; border: 0; border-top: 1px solid var(--border); }
+
+    .mensaje {
+      display: none;
+      margin: 16px 0;
+      padding: 13px 15px;
+      border-radius: 9px;
+      white-space: pre-line;
+    }
+
+    .mensaje.visible { display: block; }
+    .mensaje.info { background: #eaf4fa; color: #174d68; }
+    .mensaje.error { background: #fdecec; color: var(--danger); }
+    .mensaje.ok { background: #eaf7ef; color: var(--success); }
+
+    #resultados { display: none; }
+
+    .filtros {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 22px;
+    }
+
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+      margin-bottom: 22px;
+    }
+
+    .kpi, .card {
+      background: var(--card);
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      box-shadow: 0 4px 14px rgba(31, 53, 94, .07);
+    }
+
+    .kpi { padding: 20px; }
+    .kpi .label { color: var(--muted); font-size: 14px; }
+    .kpi .value { margin-top: 7px; color: var(--title); font-size: 28px; font-weight: 700; }
+
+    .card { margin: 18px 0; overflow: hidden; }
+    .card-header { padding: 16px 18px 6px; color: var(--title); font-size: 20px; font-weight: 700; }
+    .card-subtitle { padding: 0 18px 10px; color: var(--muted); font-size: 13px; }
+    .plot { width: 100%; min-height: 450px; }
+    .card-body { padding: 16px 18px 20px; }
+
+    .table-wrap { width: 100%; overflow: auto; max-height: 560px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 9px 10px; border-bottom: 1px solid #e8edf2; text-align: left; white-space: nowrap; }
+    th { position: sticky; top: 0; z-index: 1; background: #edf3f7; color: var(--title); }
+    tbody tr:nth-child(even) { background: #fafcfd; }
+
+    .seccion { margin-top: 28px; }
+
+    @media (max-width: 800px) {
+      .grid-consulta, .filtros, .kpis { grid-template-columns: 1fr; }
+      .titulo-app { font-size: 34px; }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="container">
+    <h1 class="titulo-app">Cheques Rechazados</h1>
+    <p class="subtitulo-app">Consulta, análisis y seguimiento de cheques rechazados y comportamiento de pagos</p>
+
+
+    <div class="fuente-app">Fuente: BCRA - API Central de Deudores v1.0 | Cheques Rechazados</div>
+    <hr>
+
+    <section class="grid-consulta">
+      <div>
+        <label for="cuits">CUITs</label>
+        <textarea id="cuits" placeholder="Ingresar un CUIT por línea"></textarea>
+      </div>
+      <div>
+        <button id="consultar" class="btn-primary">Consultar</button>
+      </div>
+    </section>
+
+    <div class="export-row">
+      <button id="descargarExcel" class="btn-secondary" disabled>Exportar Excel</button>
+    <div id="mensaje" class="mensaje"></div>
+    </div>
+
+    <section id="resultados">
+      <div class="filtros">
+        <div>
+          <label for="periodoDesde">Período desde</label>
+          <select id="periodoDesde"></select>
+        </div>
+        <div>
+          <label for="periodoHasta">Período hasta</label>
+          <select id="periodoHasta"></select>
+        </div>
+      </div>
+
+      <div class="seccion">
+        <h2>Resumen ejecutivo</h2>
+        <div class="kpis">
+          <div class="kpi"><div class="label">Deudores</div><div id="kpiDeudores" class="value">0</div></div>
+          <div class="kpi"><div class="label">Cantidad de cheques</div><div id="kpiCheques" class="value">0</div></div>
+          <div class="kpi"><div class="label">Monto total m$</div><div id="kpiMonto" class="value">0</div></div>
+        </div>
+      </div>
+
+      <article class="card">
+        <div class="card-header">Ranking de Deudores</div>
+        <div class="card-subtitle">Concentración de deuda por monto de cheques rechazados</div>
+        <div id="grafRanking" class="plot"></div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">Análisis de Riesgo</div>
+        <div class="card-subtitle">Relación entre monto rechazado, porcentaje de regularización y cantidad de cheques</div>
+        <div id="grafScatter" class="plot"></div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">Resumen por Deudor</div>
+        <div class="card-body"><div id="tablaResumen" class="table-wrap"></div></div>
+      </article>
+
+      <div class="seccion">
+        <h2>Detalle del Deudor</h2>
+        <label for="empresaSelec">Seleccionar CUIT</label>
+        <select id="empresaSelec"></select>
+      </div>
+
+      <article class="card">
+        <div class="card-header">Distribución por Entidades</div>
+        <div id="grafEntidades" class="plot"></div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">Causales de Rechazo</div>
+        <div id="grafCausales" class="plot"></div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">Pagados vs No Pagados</div>
+        <div id="grafPagados" class="plot"></div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">Detalle Completo de Cheques</div>
+        <div class="card-body"><div id="tablaDetalle" class="table-wrap"></div></div>
+      </article>
+    </section>
+  </main>
+
+<script>
+'use strict';
+
+const API_BASE = 'https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/';
+let baseCompleta = [];
+let baseFiltrada = [];
+let resumenEmpresas = [];
+let periodos = [];
+
+const ENTIDADES = {
+  7: "007 - Banco de Galicia y Buenos Aires S.A.U.",
+  11: "011 - Banco de la Nación Argentina",
+  14: "014 - Banco Provincia de Buenos Aires",
+  17: "017 - Banco BBVA Argentina",
+  27: "027 - Banco Supervielle",
+  34: "034 - Banco Patagonia",
+  44: "044 - Banco Hipotecario",
+  45: "045 - Banco de San Juan",
+  72: "072 - Banco Santander Argentina",
+  86: "086 - Banco de Santa Cruz",
+  93: "093 - Banco de La Pampa",
+  94: "094 - Banco de Corrientes",
+  97: "097 - Banco Provincia del Neuquén",
+  143: "143 - Brubank",
+  191: "191 - Banco Credicoop",
+  198: "198 - Banco de Valores",
+  247: "247 - Banco Roela",
+  254: "254 - Banco Mariva",
+  268: "268 - Banco Tierra del Fuego",
+  285: "285 - Banco Macro",
+  299: "299 - Banco Comafi",
+  300: "300 - BICE",
+  301: "301 - Banco Piano",
+  309: "309 - Banco Rioja",
+  311: "311 - Nuevo Banco del Chaco",
+  315: "315 - Banco de Formosa",
+  321: "321 - Banco de Santiago del Estero",
+  330: "330 - Nuevo Banco de Santa Fe",
+  332: "332 - Banco de Servicios Financieros",
+  338: "338 - Banco de Servicios y Transacciones",
+  341: "341 - Banco Masventas",
+  384: "384 - Ualá Bank",
+  386: "386 - Nuevo Banco de Entre Ríos",
+  389: "389 - Banco Columbia",
+  426: "426 - Banco Bica",
+  431: "431 - Banco Coinag",
+  432: "432 - Banco de Comercio",
+  435: "435 - Banco Sucrédito Regional",
+  448: "448 - Banco Dino"
+};
+
+const $ = id => document.getElementById(id);
+const formatoNumero = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 });
+const formatoRatio = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function mostrarMensaje(texto, tipo = 'info') {
+  const caja = $('mensaje');
+  caja.textContent = texto;
+  caja.className = `mensaje visible ${tipo}`;
+}
+
+function ocultarMensaje() {
+  $('mensaje').className = 'mensaje';
+  $('mensaje').textContent = '';
+}
+
+function limpiarCuit(valor) {
+  return String(valor ?? '').replace(/\D/g, '');
+}
+
+function fechaValida(valor) {
+  if (valor === null || valor === undefined || valor === '') return null;
+  const fecha = new Date(String(valor).slice(0, 10) + 'T00:00:00');
+  return Number.isNaN(fecha.getTime()) ? null : fecha;
+}
+
+function formatoFecha(valor) {
+  const fecha = fechaValida(valor);
+  return fecha ? fecha.toLocaleDateString('es-AR') : '';
+}
+
+function obtenerPeriodo(valor) {
+  const fecha = fechaValida(valor);
+  if (!fecha) return '';
+  return `${String(fecha.getMonth() + 1).padStart(2, '0')}-${fecha.getFullYear()}`;
+}
+
+function periodoAFecha(periodo) {
+  const [mes, anio] = periodo.split('-').map(Number);
+  return new Date(anio, mes - 1, 1);
+}
+
+function valorNumerico(valor) {
+  if (typeof valor === 'number') return Number.isFinite(valor) ? valor : 0;
+  if (valor === null || valor === undefined || valor === '') return 0;
+  const limpio = String(valor).replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
+  const numero = Number(limpio);
+  return Number.isFinite(numero) ? numero : 0;
+}
+
+function escaparHTML(valor) {
+  return String(valor ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function esperar(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function obtenerCheques(cuit) {
+  const url = API_BASE + encodeURIComponent(cuit);
+  let respuesta;
+
+  try {
+    respuesta = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  } catch (error) {
+    throw new Error(`No fue posible conectarse con la API para el CUIT ${cuit}. Puede tratarse de una restricción de red o CORS del navegador.`);
+  }
+
+  if (respuesta.status === 404) return [];
+
+  if (respuesta.status === 429) {
+    await esperar(10000);
+    respuesta = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  }
+
+  if (!respuesta.ok) {
+    throw new Error(`La API devolvió el estado ${respuesta.status} para el CUIT ${cuit}.`);
+  }
+
+  const json = await respuesta.json();
+  const results = json.results || {};
+  const causales = Array.isArray(results.causales) ? results.causales : [];
+  const filas = [];
+
+  for (const causalObj of causales) {
+    const entidades = Array.isArray(causalObj.entidades) ? causalObj.entidades : [];
+
+    for (const entidadObj of entidades) {
+      const detalle = Array.isArray(entidadObj.detalle) ? entidadObj.detalle : [];
+
+      for (const registro of detalle) {
+        filas.push({
+          ...registro,
+          fechaRechazo: registro.fechaRechazo || null,
+          periodo: obtenerPeriodo(registro.fechaRechazo),
+          CUIT: String(results.identificacion ?? cuit),
+          Denominacion: results.denominacion ?? '',
+          causal: causalObj.causal ?? '',
+          entidad: entidadObj.entidad ?? '',
+entidad_desc:
+  ENTIDADES[entidadObj.entidad] ||
+  `${entidadObj.entidad}`
+        });
+      }
+    }
+  }
+
+  return filas;
+}
+
+function cargarPeriodos() {
+  periodos = [...new Set(baseCompleta.map(f => f.periodo).filter(Boolean))]
+    .sort((a, b) => periodoAFecha(a) - periodoAFecha(b));
+
+  const opciones = periodos.map(p => `<option value="${p}">${p}</option>`).join('');
+  $('periodoDesde').innerHTML = opciones;
+  $('periodoHasta').innerHTML = opciones;
+
+  if (periodos.length) {
+    $('periodoDesde').value = periodos[0];
+    $('periodoHasta').value = periodos[periodos.length - 1];
+  }
+}
+
+function filtrarBase() {
+  const desde = periodos.indexOf($('periodoDesde').value);
+  const hasta = periodos.indexOf($('periodoHasta').value);
+
+  if (desde < 0 || hasta < 0) return;
+  if (desde > hasta) {
+    mostrarMensaje('El período desde no puede ser posterior al período hasta.', 'error');
+    return;
+  }
+
+  ocultarMensaje();
+  const seleccionados = new Set(periodos.slice(desde, hasta + 1));
+
+  baseFiltrada = baseCompleta
+    .filter(f => seleccionados.has(f.periodo))
+    .map(f => ({ ...f, CUIT: String(f.CUIT), monto: valorNumerico(f.monto) / 1000 }));
+
+  generarResumen();
+  actualizarVistaGeneral();
+  actualizarSelectorEmpresas();
+  actualizarDetalleEmpresa();
+}
+
+function generarResumen() {
+  const grupos = new Map();
+
+  for (const fila of baseFiltrada) {
+    const clave = `${fila.CUIT}|||${fila.Denominacion}`;
+    if (!grupos.has(clave)) grupos.set(clave, []);
+    grupos.get(clave).push(fila);
+  }
+
+  resumenEmpresas = [...grupos.values()].map(filas => {
+    const montoTotal = filas.reduce((s, f) => s + valorNumerico(f.monto), 0);
+    const pagados = filas.filter(f => fechaValida(f.fechaPago));
+    const montoPagados = pagados.reduce((s, f) => s + valorNumerico(f.monto), 0);
+    const fechas = filas.map(f => fechaValida(f.fechaRechazo)).filter(Boolean).sort((a, b) => a - b);
+
+    return {
+      CUIT: filas[0].CUIT,
+      Denominacion: filas[0].Denominacion,
+      Q_Total: filas.length,
+      Monto_Total: montoTotal,
+      Entidades: new Set(filas.map(f => f.entidad).filter(Boolean)).size,
+      Q_Pagados: pagados.length,
+      Ratio_Pagados: filas.length ? pagados.length / filas.length : 0,
+      Monto_Pagados: montoPagados,
+      Per_Monto_Pagados: montoTotal ? montoPagados / montoTotal : 0,
+      Prim_FecRec: fechas.length ? formatoFecha(fechas[0].toISOString().slice(0, 10)) : '',
+      Ult_FecRec: fechas.length ? formatoFecha(fechas[fechas.length - 1].toISOString().slice(0, 10)) : ''
+    };
+  });
+}
+
+function actualizarVistaGeneral() {
+  $('kpiDeudores').textContent = formatoNumero.format(resumenEmpresas.length);
+  $('kpiCheques').textContent = formatoNumero.format(resumenEmpresas.reduce((s, f) => s + f.Q_Total, 0));
+  $('kpiMonto').textContent = formatoNumero.format(Math.round(resumenEmpresas.reduce((s, f) => s + f.Monto_Total, 0)));
+  graficarRanking();
+  graficarScatter();
+  renderizarTablaResumen();
+}
+
+const configPlotly = { responsive: true, displaylogo: false, locale: 'es' };
+
+function graficarRanking() {
+  const datos = [...resumenEmpresas].sort((a, b) => a.Monto_Total - b.Monto_Total);
+
+  Plotly.react('grafRanking', [{
+    x: datos.map(d => d.Monto_Total),
+    y: datos.map(d => d.Denominacion || d.CUIT),
+    type: 'bar',
+    orientation: 'h',
+    marker: { color: '#35799b' },
+    customdata: datos.map(d => formatoNumero.format(Math.round(d.Monto_Total))),
+    hovertemplate: '<b>%{y}</b><br>Monto: %{customdata}<extra></extra>'
+  }], {
+    margin: { l: 190, r: 30, t: 20, b: 60 },
+    xaxis: { title: 'Monto m $', separatethousands: true },
+    yaxis: { title: 'Denominación Deudor', automargin: true }
+  }, configPlotly);
+}
+
+function graficarScatter() {
+  Plotly.react('grafScatter', [{
+    x: resumenEmpresas.map(d => d.Ratio_Pagados),
+    y: resumenEmpresas.map(d => d.Monto_Total),
+    mode: 'markers',
+    type: 'scatter',
+    marker: {
+      size: resumenEmpresas.map(d => d.Q_Total),
+      sizemode: 'area',
+      sizeref: 2 * Math.max(...resumenEmpresas.map(d => d.Q_Total), 1) / Math.pow(14, 2),
+      sizemin: 4,
+      color: '#35799b',
+      opacity: 0.75
+    },
+    text: resumenEmpresas.map(d =>
+      `<b>${escaparHTML(d.Denominacion)}</b><br>` +
+      `Ratio Pagados: ${formatoRatio.format(d.Ratio_Pagados)}<br>` +
+      `Monto: ${formatoNumero.format(Math.round(d.Monto_Total))}<br>` +
+      `Cantidad Cheques: ${formatoNumero.format(d.Q_Total)}`
+    ),
+    hovertemplate: '%{text}<extra></extra>'
+  }], {
+    margin: { l: 80, r: 30, t: 20, b: 60 },
+    xaxis: {
+      title: 'Ratio Pagados',
+      rangemode: 'tozero',
+      tickformat: '.1f'
+    },
+    yaxis: {
+      title: 'Monto Total (m$)',
+      rangemode: 'tozero',
+      separatethousands: true,
+      exponentformat: 'SI'
+    }
+  }, configPlotly);
+}
+
+function crearTabla(datos, columnas) {
+  if (!datos.length) return '<p>No hay registros para mostrar.</p>';
+
+  const encabezado = columnas.map(c => `<th>${escaparHTML(c.titulo)}</th>`).join('');
+  const cuerpo = datos.map(fila => {
+    const celdas = columnas.map(c => {
+      const valor = c.formato ? c.formato(fila[c.campo], fila) : fila[c.campo];
+      return `<td>${escaparHTML(valor ?? '')}</td>`;
+    }).join('');
+    return `<tr>${celdas}</tr>`;
+  }).join('');
+
+  return `<table><thead><tr>${encabezado}</tr></thead><tbody>${cuerpo}</tbody></table>`;
+}
+
+function renderizarTablaResumen() {
+  const datos = [...resumenEmpresas].sort((a, b) => b.Monto_Total - a.Monto_Total);
+  const columnas = [
+    { campo: 'CUIT', titulo: 'CUIT' },
+    { campo: 'Denominacion', titulo: 'Denominación' },
+    { campo: 'Q_Total', titulo: 'Q Total', formato: v => formatoNumero.format(v) },
+    { campo: 'Monto_Total', titulo: 'Monto Total m$', formato: v => formatoNumero.format(Math.round(v)) },
+    { campo: 'Entidades', titulo: 'Entidades' },
+    { campo: 'Q_Pagados', titulo: 'Q Pagados' },
+    { campo: 'Ratio_Pagados', titulo: 'Ratio Pagados', formato: v => formatoRatio.format(v) },
+    { campo: 'Monto_Pagados', titulo: 'Monto Pagados m$', formato: v => formatoNumero.format(Math.round(v)) },
+    { campo: 'Per_Monto_Pagados', titulo: '% Monto Pagados', formato: v => formatoRatio.format(v) },
+    { campo: 'Prim_FecRec', titulo: 'Primera fecha rechazo' },
+    { campo: 'Ult_FecRec', titulo: 'Última fecha rechazo' }
+  ];
+  $('tablaResumen').innerHTML = crearTabla(datos, columnas);
+}
+
+function actualizarSelectorEmpresas() {
+  const valorAnterior = $('empresaSelec').value;
+  const datos = [...resumenEmpresas].sort((a, b) => a.Denominacion.localeCompare(b.Denominacion));
+  $('empresaSelec').innerHTML = datos.map(d =>
+    `<option value="${escaparHTML(d.CUIT)}">${escaparHTML(d.CUIT)} - ${escaparHTML(d.Denominacion)}</option>`
+  ).join('');
+
+  if (datos.some(d => d.CUIT === valorAnterior)) $('empresaSelec').value = valorAnterior;
+}
+
+function agruparSuma(datos, campoGrupo, campoSuma) {
+  const mapa = new Map();
+  datos.forEach(f => mapa.set(String(f[campoGrupo] || 'Sin dato'), (mapa.get(String(f[campoGrupo] || 'Sin dato')) || 0) + valorNumerico(f[campoSuma])));
+  return [...mapa.entries()].map(([nombre, valor]) => ({ nombre, valor }));
+}
+
+function agruparConteo(datos, campo) {
+  const mapa = new Map();
+  datos.forEach(f => mapa.set(String(f[campo] || 'Sin dato'), (mapa.get(String(f[campo] || 'Sin dato')) || 0) + 1));
+  return [...mapa.entries()].map(([nombre, valor]) => ({ nombre, valor }));
+}
+
+function actualizarDetalleEmpresa() {
+  const cuit = $('empresaSelec').value;
+  const detalle = baseFiltrada.filter(f => f.CUIT === cuit);
+
+  const entidades = agruparSuma(
+detalle,
+'entidad_desc',
+'monto'
+).sort((a, b) => a.valor - b.valor);
+  Plotly.react('grafEntidades', [{
+    x: entidades.map(d => d.valor), y: entidades.map(d => d.nombre),
+    type: 'bar', orientation: 'h', marker: { color: '#35799b' },
+    hovertemplate: '<b>%{y}</b><br>Monto: %{x:,.0f}<extra></extra>'
+  }], {
+    margin: { l: 190, r: 30, t: 20, b: 60 },
+    xaxis: { title: 'Monto m$', separatethousands: true },
+    yaxis: { title: 'Entidades', automargin: true }
+  }, configPlotly);
+
+  const causales = agruparConteo(detalle, 'causal');
+  Plotly.react('grafCausales', [{
+    labels: causales.map(d => d.nombre), values: causales.map(d => d.valor),
+    type: 'pie', hole: .6, marker: { colors: ['#35799b', '#6c757d', '#9bb9c8', '#1f355e'] }
+  }], { margin: { l: 25, r: 25, t: 20, b: 25 } }, configPlotly);
+
+  const estados = [
+    { nombre: 'Pagado', valor: detalle.filter(f => fechaValida(f.fechaPago)).length },
+    { nombre: 'No Pagado', valor: detalle.filter(f => !fechaValida(f.fechaPago)).length }
+  ];
+  Plotly.react('grafPagados', [{
+    labels: estados.map(d => d.nombre), values: estados.map(d => d.valor),
+    type: 'pie', hole: .65, marker: { colors: ['#35799b', '#6c757d'] }
+  }], { margin: { l: 25, r: 25, t: 20, b: 25 } }, configPlotly);
+
+  const camposPreferidos = [
+'CUIT',
+'Denominacion',
+'entidad_desc', 'causal', 'fechaRechazo', 'fechaPago', 'fechaPagoMulta', 'monto', 'numeroCheque'];
+  const todosCampos = [...new Set(detalle.flatMap(Object.keys))];
+  const campos = [...camposPreferidos.filter(c => todosCampos.includes(c)), ...todosCampos.filter(c => !camposPreferidos.includes(c))];
+  const columnas = campos.map(c => ({
+    campo: c,
+    titulo: c,
+    formato: (v) => c.toLowerCase().includes('fecha') ? formatoFecha(v) : (c === 'monto' ? formatoNumero.format(Math.round(valorNumerico(v))) : v)
+  }));
+  $('tablaDetalle').innerHTML = crearTabla(detalle, columnas);
+}
+
+async function consultar() {
+  const boton = $('consultar');
+  const cuits = [...new Set($('cuits').value.split(/\r?\n/).map(limpiarCuit).filter(Boolean))];
+
+  if (!cuits.length) {
+    mostrarMensaje('Ingresá al menos un CUIT.', 'error');
+    return;
+  }
+
+  const invalidos = cuits.filter(c => c.length !== 11);
+  if (invalidos.length) {
+    mostrarMensaje(`Los siguientes CUIT no tienen 11 dígitos: ${invalidos.join(', ')}`, 'error');
+    return;
+  }
+
+  boton.disabled = true;
+  boton.textContent = 'Consultando...';
+  $('descargarExcel').disabled = true;
+  $('resultados').style.display = 'none';
+  mostrarMensaje(`Consultando ${cuits.length} CUIT(s). Este proceso puede demorar.`, 'info');
+
+  const acumulado = [];
+  const advertencias = [];
+
+  try {
+    for (let i = 0; i < cuits.length; i++) {
+      mostrarMensaje(`Consultando CUIT ${i + 1} de ${cuits.length}: ${cuits[i]}`, 'info');
+      try {
+        const filas = await obtenerCheques(cuits[i]);
+        acumulado.push(...filas);
+        if (!filas.length) advertencias.push(`${cuits[i]}: sin registros`);
+      } catch (error) {
+        advertencias.push(`${cuits[i]}: ${error.message}`);
+      }
+    }
+
+    baseCompleta = acumulado;
+
+    if (!baseCompleta.length) {
+      throw new Error('No se obtuvieron registros.\n\n' + advertencias.join('\n'));
+    }
+
+    cargarPeriodos();
+    if (!periodos.length) throw new Error('Se obtuvieron datos, pero no se identificaron períodos válidos.');
+
+    filtrarBase();
+    $('resultados').style.display = 'block';
+    $('descargarExcel').disabled = false;
+    mostrarMensaje(`Consulta finalizada. Registros obtenidos: ${formatoNumero.format(baseCompleta.length)}${advertencias.length ? '\n' + advertencias.join('\n') : ''}`, advertencias.length ? 'info' : 'ok');
+  } catch (error) {
+    mostrarMensaje(error.message, 'error');
+  } finally {
+    boton.disabled = false;
+    boton.textContent = 'Consultar';
+  }
+}
+
+function descargarExcel() {
+  if (!baseFiltrada.length) return;
+  if (typeof XLSX === 'undefined') {
+    mostrarMensaje('No se cargó la biblioteca necesaria para exportar a Excel.', 'error');
+    return;
+  }
+
+  const resumenExportar = resumenEmpresas.map(d => ({
+    ...d,
+    Monto_Total: Math.round(d.Monto_Total),
+    Ratio_Pagados: d.Ratio_Pagados,
+    Monto_Pagados: Math.round(d.Monto_Pagados),
+    Per_Monto_Pagados: d.Per_Monto_Pagados
+  }));
+
+  const wb = XLSX.utils.book_new();
+  const wsResumen = XLSX.utils.json_to_sheet(resumenExportar);
+  const wsDetalle = XLSX.utils.json_to_sheet(baseFiltrada);
+  XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
+  XLSX.utils.book_append_sheet(wb, wsDetalle, 'Detalle');
+  XLSX.writeFile(wb, `Cheques_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+$('consultar').addEventListener('click', consultar);
+$('descargarExcel').addEventListener('click', descargarExcel);
+$('periodoDesde').addEventListener('change', filtrarBase);
+$('periodoHasta').addEventListener('change', filtrarBase);
+$('empresaSelec').addEventListener('change', actualizarDetalleEmpresa);
+</script>
+</body>
+</html>
